@@ -1,6 +1,4 @@
-function [dLdW, dLdP] = pivot_regressor_gradients(W, P, data, targets)
-
-K = kernel_matrix(P, data);
+function [dLdW, dLdP] = pivot_regressor_gradients(K, W, P, data, targets)
 
 %% optimize weights
 dLdW = -(targets - W*K) * K.';
