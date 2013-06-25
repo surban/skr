@@ -1,8 +1,7 @@
-global kernel_l;
 
 %% parameters
 rate_fac = 1.1;
-kernel_l = 2;
+use_gpu = true;
 
 %% load data
 load('boston.mat');
@@ -31,6 +30,14 @@ n_hidden = 200;
 W = rand(n_targets, n_hidden) - 0.5;
 V = rand(n_hidden, n_features) - 0.5;
 
+%% copy to GPU
+if use_gpu
+    W = gpuArray(W);
+    V = gpuArray(V);
+    data = gpuArray(data);
+    targets = gpuArray(targets);
+end
+
 %% iterate
 n_iters = 1000000;
 %n_iters=1;
@@ -50,8 +57,10 @@ for iter=1:n_iters
     
     %% calculate performance
     tar_err = norm(T - targets, 'fro');   
-    fprintf('iter=%05d rate=%.5g tar_err=%.5f\n', ...
-        iter, rate, tar_err);
+    if mod(iter, 100) == 0
+        fprintf('iter=%07d rate=%.5g tar_err=%.5f\n', ...
+            iter, rate, tar_err);
+    end
 
     %% adjust learning rate
     obj = tar_err;   
