@@ -1,6 +1,7 @@
 global kernel_l;
 
 %% parameters
+use_gpu = gpuDeviceCount;
 rate_fac = 1.1;
 kernel_l = 2;
 
@@ -9,16 +10,13 @@ load('boston.mat');
 data = boston.data';
 targets = boston.target';
 
-% data=data(:,1:10);
-% targets=targets(:,1:10);
-
 % normalize data
 maxdata = max(data,[],2);
 maxdata(maxdata == 0) = 1;
 data = data ./ repmat(maxdata, 1, size(data,2));
 
 % add bias
-data = [data; repmat(1, 1, size(data,2))];
+data = [data; ones(1, size(data,2))];
 
 %% initialize variables 
 n_samples = size(data,2);
@@ -32,47 +30,32 @@ W = rand(n_targets, n_pivs) - 0.5;
 V = rand(n_hidden, n_features) - 0.5;
 P = rand(n_hidden, n_pivs) - 0.5;
 
+%% copy to GPU
+if use_gpu
+    W = gpuArray(W);
+    P = gpuArray(P);
+    V = gpuArray(V);
+    data = gpuArray(data);
+    targets = gpuArray(targets);
+end
+
 %% iterate
 n_iters = 1000000;
 last_obj = 100000000;
-rate = 0.001;
-rate_hold = 1;
+rate = 0.0001;
+rate_hold = 1000;
 
 fprintf('Start:\n');
 for iter=1:n_iters
-
-    last_W = W;
-    last_V = V;
-    last_P = P;
-    
-    %% calculate hiddens H
+   
+    %% calculate hiddens H and kernel matrix K
     H = sigmoid(V * data);   
     dsigmoid = (1-H) .* H;
-    
-    %% train W and P
-    [dLdW, dLdP] = pivot_regressor_gradients(W, P, H, targets);      
-
-    %continue;
-    
-    %% train V
-    K = kernel_matrix(P, H);    
-    dLdK = - 2 * W.' * (targets - W*K);
-    dLdH = kernel_gradient_wrt_x(K, P, H, dLdK);    
-    dLdV = (dLdH .* dsigmoid) * data.';
-
-    %% update parameters
-    W = W - (rate/n_samples) * dLdW;
-    P = P - (rate/n_samples) * dLdP;
-    V = V - (rate/n_samples) * dLdV;   
+    K = kernel_matrix(P, H);        
     
     %% calculate performance
-    H = sigmoid(V * data);   
-    K = kernel_matrix(P, H);       
-    tp = W * K;
-    td = tp - targets;
-    tar_err = norm(td, 'fro');
-    
-    fprintf('iter=%05d rate=%.5g tar_err=%.5f\n', ...
+    tar_err = norm(W*K - targets, 'fro');    
+    fprintf('iter=%07d rate=%.5g tar_err=%.5f\n', ...
         iter, rate, tar_err);
    
     %% adjust learning rate
@@ -89,8 +72,27 @@ for iter=1:n_iters
     elseif rate_hold < 0
         rate = rate * rate_fac;        
     end
+    rate = min(0.01, rate);
     rate_hold = rate_hold - 1;    
+
+    last_W = W;
+    last_V = V;
+    last_P = P;    
     last_obj = obj;          
+    
+    %% gradient wrt W and P
+    [dLdW, dLdP] = pivot_regressor_gradients(K, W, P, H, targets);      
+
+    %% gradient wrt V
+    dLdK = - 2 * W.' * (targets - W*K);
+    dLdH = kernel_gradient_wrt_x(K, P, H, dLdK);    
+    dLdV = (dLdH .* dsigmoid) * data.';
+
+    %% update parameters
+    W = W - (rate/n_samples) * dLdW;
+    P = P - (rate/n_samples) * dLdP;
+    V = V - (rate/n_samples) * dLdV;       
+    
 end
 
 %% final error
